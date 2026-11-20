@@ -58,7 +58,7 @@ def test_tract(repo):
     assert t["cluster"] == int(csv.loc["leftArc", "cluster"])
     joint = t["top_topics"]["joint"]
     assert len(joint) == 10
-    assert [x["r"] for x in joint] == sorted((x["r"] for x in joint), reverse=True)
+    assert [abs(x["r"]) for x in joint] == sorted((abs(x["r"]) for x in joint), reverse=True)
     assert set(t["top_topics"]) == {"joint", "RAS", "LPI"}
     json.dumps(t, allow_nan=False)
 
@@ -80,7 +80,7 @@ def test_networks(repo):
     assert nets
     assert all(n["max_dice"] >= n["dice"] for n in nets)
     assert [n["dice"] for n in nets] == sorted((n["dice"] for n in nets), reverse=True)
-    assert all(n["significant"] == (n["p_value"] < 0.05) for n in nets)
+    assert all(n["significant"] == (n["p_value"] <= 0.05) for n in nets)
     with pytest.raises(NotFound) as e:
         repo.networks("thr-15", "tract", "leftArc", "NOPE")
     assert "TY7" in e.value.hint
@@ -100,3 +100,23 @@ def test_topics(repo):
     assert rows and [r["r"] for r in rows] == sorted((r["r"] for r in rows), reverse=True)
     with pytest.raises(NotFound):
         repo.tracts_for_topic("thr-15", 999999)
+
+
+def test_top_topics_rank_by_abs_r(repo):
+    m = pd.read_csv(ROOT / "testdata/thr-15/matrix.csv", index_col=0)
+    checked = 0
+    for name, row in m.iterrows():
+        row = row.dropna()
+        by_abs = {int(c.split("_")[0]) for c in row.abs().sort_values(ascending=False, kind="stable").index[:10]}
+        by_signed = {int(c.split("_")[0]) for c in row.sort_values(ascending=False).index[:10]}
+        if by_abs != by_signed:
+            got = {x["id"] for x in repo.tract("thr-15", name)["top_topics"]["joint"]}
+            assert got == by_abs
+            assert any(x["r"] < 0 for x in repo.tract("thr-15", name)["top_topics"]["joint"])
+            checked += 1
+    assert checked > 0
+
+
+def test_default_atlas_is_alphabetical_first(repo):
+    default = repo.networks("thr-15", "tract", "leftArc")
+    assert default == repo.networks("thr-15", "tract", "leftArc", "AS200Y17")

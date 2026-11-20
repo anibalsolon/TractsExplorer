@@ -128,9 +128,10 @@ class Repository:
     # ---- helpers ----------------------------------------------------
     @staticmethod
     def _top(row, n):
+        """Top n topics ranked by |r| descending (as the explorer does); r keeps its sign."""
         items = [(c, _num(v)) for c, v in row.items()]
         items = [(c, v) for c, v in items if v is not None]
-        items.sort(key=lambda cv: -cv[1])
+        items.sort(key=lambda cv: -abs(cv[1]))  # stable, like the explorer's JS sort
         return [{"id": topic_id(c), "label": topic_label(c), "r": v} for c, v in items[:n]]
 
     def _tract_names(self, thr):
@@ -221,6 +222,7 @@ class Repository:
         return out
 
     def tracts_for_topic(self, thr, topic_id_, limit=10):
+        """Tracts ranked by signed r descending (strongest positive association first)."""
         f = self._frames(thr)
         col = next((c for c in f["mats"]["joint"].columns if topic_id(c) == int(topic_id_)), None)
         if col is None:
@@ -234,7 +236,7 @@ class Repository:
         net = self._frames(thr)["net"]
         atlases = list(dict.fromkeys(net["group"]))
         if atlas is None:
-            atlas = atlases[0]
+            atlas = sorted(atlases)[0]  # explorer default: first alphabetically
         elif atlas not in atlases:
             raise NotFound(f"Unknown atlas '{atlas}'.", "Available atlases: " + ", ".join(atlases))
         sub = net[(net.entity_type == entity_type) & (net.entity_id == str(entity_id)) & (net.group == atlas)]
@@ -242,6 +244,6 @@ class Repository:
         for r in sub.itertuples():
             p = _num(r.p_value)
             rows.append({"name": r.name, "dice": _num(r.dice), "max_dice": _num(r.max_possible_dice),
-                         "p_value": p, "significant": p is not None and p < 0.05})
+                         "p_value": p, "significant": p is not None and p <= 0.05})
         rows.sort(key=lambda x: -(x["dice"] if x["dice"] is not None else -1))
         return rows
