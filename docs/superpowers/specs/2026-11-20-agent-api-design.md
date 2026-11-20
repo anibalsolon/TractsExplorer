@@ -236,3 +236,23 @@ setting, noted in the PR, not changed by it).
 - Internal structure of `server/`, caching.
 - Tool argument and response field names, if consistent and documented.
 - Whether to add a Dockerfile for later deployment.
+
+## SKAI round trip — findings (2026-11-20)
+
+Docker is not available here, so SKAI was not run. These findings come from reading the SKAI code (`brainlife-assistant/api/assistant_api`), not from a live test.
+
+**(a) Registering and calling a client tool.** The client sends a `CLIENT_CAPABILITIES` message with `{tools, platform}` (`agents/react/agent.py:225`), which calls `set_client_tools` (`agents/react/llm_integration.py:182`). Entries are validated against `ClientToolSpec` (`llm_integration.py:86`); bad ones are dropped, not raised. When the model calls such a tool, the result carries a `__client_tool__` marker (`llm_integration.py:32-80`). The action phase turns that into a `CLIENT_TOOL` event with tool, platform and arguments (`agents/react/phases/action.py:541`). `ingest` forwards it to the frontend but does not store it (`agents/agent.py:164`).
+
+**(b) The loop parks after CLIENT_TOOL.** After emitting the event, the ReAct loop saves its state in `_pending_resume` and stops (`agents/react/llm_agent.py:385-401`). It resumes only when the client sends a `TOOL_CALL` (`agent.py:231`). `process_tool_call` (`llm_agent.py:506`) runs that tool server-side through `mcp_integration.execute_tool_call`, so it must be a real MCP tool. A display-only page action such as `show_in_explorer` has no MCP implementation. The client cannot send a "done" reply, so the resume path is unclear and the answer may never finish.
+
+**(c) Without a client tool, SKAI falls back to a plain URL.** The prompt says to open viewable URLs with a client tool, and to fall back to a plain URL "when no client tool can display it" (`agents/react/prompts/__init__.py:61`). With no tool registered, SKAI puts the explorer link in its text answer, and the panel (`skai-panel.js`) applies it. That is the mechanism now.
+
+**(d) Decision.** Link-following is the mechanism for now. We register no client tool and change no JS. A dedicated `show_in_explorer` action needs a live test against a running SKAI, and possibly a small SKAI change so display-only client tools can complete. To try next time:
+1. Run SKAI (docker compose) and connect the panel to it.
+2. Send `CLIENT_CAPABILITIES` with a `show_in_explorer` tool and ask a question that yields an explorer link.
+3. Check that `CLIENT_TOOL` arrives with the arguments, and that the panel can apply it.
+4. Check what the panel must send back. Try a `TOOL_CALL` with a no-op MCP tool, and check whether the loop ends and the answer finishes.
+5. If it hangs, propose a SKAI change: a display-only flag on `ClientToolSpec` that does not park the loop.
+6. Confirm the plain-URL fallback still works when no client tool is registered.
+
+**Uncertainties.** I did not trace what `ClientToolSpec` requires (fields, naming rules). I do not know whether SKAI times out a parked loop or drops it when a new user message arrives. I did not confirm that the model reliably puts explorer URLs in its answer when no tool is registered. Prompt line 128 (`prompts/__init__.py`) also makes opening URLs "MANDATORY" and was not examined further.
