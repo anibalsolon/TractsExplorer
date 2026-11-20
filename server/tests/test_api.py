@@ -111,6 +111,18 @@ def test_view_url(client):
     assert r.status_code == 404 and set(r.json()) == {"error", "hint"}
 
 
+def test_view_url_checks_entities(client):
+    # tract names are canonicalised, like the tract routes
+    body = client.get("/api/view-url?tab=tract&tract=leftarc").json()
+    assert parse_back(body["view_url"])["tract"] == "leftArc"
+    for url, hint in [("/api/view-url?tract=arcuate", "leftArc"),
+                      ("/api/view-url?cluster=99", "Valid clusters"),
+                      ("/api/view-url?atlas=NOPE", "TY7")]:
+        r = client.get(url)
+        assert r.status_code == 404, url
+        assert set(r.json()) == {"error", "hint"} and hint in r.json()["hint"], url
+
+
 def test_static(client):
     r = client.get("/explorer.html")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]

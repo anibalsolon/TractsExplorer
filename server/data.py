@@ -137,7 +137,8 @@ class Repository:
     def _tract_names(self, thr):
         return list(self._frames(thr)["mats"]["joint"].index)
 
-    def _check_tract(self, thr, name):
+    def resolve_tract(self, thr, name):
+        """Canonical tract name (case-insensitive match), or NotFound with suggestions."""
         names = self._tract_names(thr)
         if name in names:
             return name
@@ -158,14 +159,18 @@ class Repository:
             "Use find_tracts to search for a tract name."
         raise NotFound(f"Unknown tract '{name}' at {thr}.", hint)
 
-    def _cluster_ids(self, thr):
+    def cluster_ids(self, thr):
         return sorted(set(self._frames(thr)["assign"].values()))
+
+    def atlases(self, thr):
+        """Network atlases at this threshold, in file order."""
+        return list(dict.fromkeys(self._frames(thr)["net"]["group"]))
 
     # ---- clusters ---------------------------------------------------
     def clusters(self, thr):
         f = self._frames(thr)
         out = []
-        for c in self._cluster_ids(thr):
+        for c in self.cluster_ids(thr):
             out.append({"cluster": c,
                         "tracts": sorted(t for t, k in f["assign"].items() if k == c),
                         "top_topics": self._top(f["cm"].loc[c], 5)})
@@ -174,9 +179,9 @@ class Repository:
     def cluster(self, thr, n, atlas=None, limit=10):
         f = self._frames(thr)
         n = int(n)
-        if n not in self._cluster_ids(thr):
+        if n not in self.cluster_ids(thr):
             raise NotFound(f"Unknown cluster {n} at {thr}.",
-                           "Valid clusters: " + ", ".join(map(str, self._cluster_ids(thr))))
+                           "Valid clusters: " + ", ".join(map(str, self.cluster_ids(thr))))
         return {"cluster": n,
                 "tracts": sorted(t for t, k in f["assign"].items() if k == n),
                 "top_topics": self._top(f["cm"].loc[n], limit),
@@ -192,7 +197,7 @@ class Repository:
 
     def tract(self, thr, name, atlas=None, limit=10):
         f = self._frames(thr)
-        name = self._check_tract(thr, name)
+        name = self.resolve_tract(thr, name)
         return {"tract": name, "label": tract_label(name), "cluster": f["assign"].get(name),
                 "top_topics": {k: self._top(f["mats"][k].loc[name], limit) if name in f["mats"][k].index else []
                                for k in ("joint", "RAS", "LPI")},
@@ -234,7 +239,7 @@ class Repository:
     # ---- networks ---------------------------------------------------
     def networks(self, thr, entity_type, entity_id, atlas=None):
         net = self._frames(thr)["net"]
-        atlases = list(dict.fromkeys(net["group"]))
+        atlases = self.atlases(thr)
         if atlas is None:
             atlas = sorted(atlases)[0]  # explorer default: first alphabetically
         elif atlas not in atlases:

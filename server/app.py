@@ -70,6 +70,11 @@ def create_app(root: Path, public_url: str, root_path: str = "") -> FastAPI:
     def view_url(thr=None, **params):
         return public_url + "/explorer.html" + to_query({"thr": thr, **params})
 
+    def check_cluster(thr, n):
+        if n not in repo.cluster_ids(thr):
+            raise NotFound(f"Unknown cluster '{n}' at {thr}.",
+                           "Valid clusters: " + ", ".join(map(str, repo.cluster_ids(thr))))
+
     def thr_info(thr):
         label = next(t["label"] for t in repo.thresholds() if t["id"] == thr)
         return {"id": thr, "label": label}
@@ -127,6 +132,15 @@ def create_app(root: Path, public_url: str, root_path: str = "") -> FastAPI:
                 if not ID_RE.match(v):
                     raise BadRequest(f"Invalid {k} '{v}'.", f"{k} may only contain letters, digits and underscores.")
                 out[k] = v
+        # The value is well-formed; now check it exists at this threshold.
+        t = out["thr"]
+        if "tract" in out:
+            out["tract"] = repo.resolve_tract(t, out["tract"])
+        if "cluster" in out:
+            check_cluster(t, out["cluster"])
+        if "atlas" in out and out["atlas"] not in repo.atlases(t):
+            raise NotFound(f"Unknown atlas '{out['atlas']}' at {t}.",
+                           "Available atlases: " + ", ".join(repo.atlases(t)))
         return {"threshold": thr_info(out["thr"]),
                 "view_url": public_url + "/explorer.html" + to_query(out)}
 
@@ -176,12 +190,10 @@ def create_app(root: Path, public_url: str, root_path: str = "") -> FastAPI:
         if kind not in ("tract", "cluster") or not ident:
             raise BadRequest(f"Invalid entity '{entity}'.", "Use entity=tract:leftArc or entity=cluster:2.")
         if kind == "tract":
-            ident = repo._check_tract(t, ident)
+            ident = repo.resolve_tract(t, ident)
             vu = view_url(t, tab="tract", tract=ident, atlas=atlas)
         else:
-            if not POSINT_RE.match(ident) or int(ident) not in repo._cluster_ids(t):
-                raise NotFound(f"Unknown cluster '{ident}' at {t}.",
-                               "Valid clusters: " + ", ".join(map(str, repo._cluster_ids(t))))
+            check_cluster(t, int(ident) if POSINT_RE.match(ident) else ident)
             vu = view_url(t, tab="cluster", cluster=int(ident), atlas=atlas)
         return {"threshold": thr_info(t), "entity": f"{kind}:{ident}",
                 "networks": repo.networks(t, kind, ident, atlas)[:limit], "view_url": vu}
