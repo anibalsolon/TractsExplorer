@@ -7,6 +7,7 @@
 (function (root) {
   var JWT_KEYS = ['jwt', 'tractexplorer.devJwt'];   // brainlife.io's key, then a dev override
   var BACKOFF_MS = 1000, BACKOFF_MAX_MS = 30000;
+  var STABLE_MS = 10000;   // a socket up this long (or one that hears back) resets the backoff
 
   function view() { return root.TEView || (typeof TEView !== 'undefined' ? TEView : null); }
 
@@ -19,16 +20,22 @@
     try { return JSON.parse(atob(b64)); } catch (e) { return null; }
   }
 
+  function pastExp(token) {
+    var p = jwtPayload(token);
+    return !!p && typeof p.exp === 'number' && p.exp * 1000 < Date.now();
+  }
+  function expired(token) {
+    var p = jwtPayload(token);
+    return !p || typeof p !== 'object' || pastExp(token);
+  }
+
   // A usable (present, decodable, unexpired) JWT from storage, or null.
   function getJwt(storage) {
     for (var i = 0; i < JWT_KEYS.length; i++) {
       var token;
       try { token = storage && storage.getItem(JWT_KEYS[i]); } catch (e) { return null; }
       if (!token) continue;
-      var p = jwtPayload(token);
-      if (!p || typeof p !== 'object') continue;
-      if (typeof p.exp === 'number' && p.exp * 1000 < Date.now()) continue;
-      return token;
+      if (!expired(token)) return token;
     }
     return null;
   }
@@ -42,7 +49,7 @@
     var setT = opts.setTimeout || setTimeout, clearT = opts.clearTimeout || clearTimeout;
     var sessionName = opts.sessionName || 'TractsExplorer';
     var msgCbs = [], statusCbs = [];
-    var ws = null, sessionId = null, timer = null, attempt = 0, closed = false, status = null;
+    var ws = null, sessionId = null, timer = null, stable = null, attempt = 0, closed = false, status = null;
 
     function setStatus(s) {
       if (s === status) return;
@@ -69,9 +76,11 @@
       ws.send(JSON.stringify({ sessionId: sessionId, message: message }));
       return true;
     }
+    function clearStable() { if (stable) { clearT(stable); stable = null; } }
     function onFrame(ev) {
       var frame;
       try { frame = JSON.parse(ev.data); } catch (e) { return; }
+      attempt = 0;   // the server is really talking to us
       var m = frame && frame.message;
       if (!m || typeof m !== 'object' || m.type === 'PONG') return;
       msgCbs.forEach(function (cb) { cb(m); });
@@ -80,7 +89,14 @@
     function connect() {
       closed = false;
       if (timer) { clearT(timer); timer = null; }
+      clearStable();
       if (ws) { var old = ws; ws = null; old.onclose = null; try { old.close(); } catch (e) {} }
+      // SKAI answers an expired JWT with a 500, so catch it here, as a login problem.
+      if (pastExp(jwt)) {
+        setStatus('login');
+        var e = new Error('SKAI login expired'); e.login = true;
+        return Promise.reject(e);
+      }
       setStatus('connecting');
       return doFetch(base + '/ticket', { headers: authed({}) })
         .then(check)
@@ -100,7 +116,9 @@
             sock.onopen = function () {
               if (sock !== ws) return;
               opened = true;
-              attempt = 0;
+              // SKAI accepts then closes on a bad ticket / missing session, so
+              // only a connection that lasts (or gets a frame) resets the backoff.
+              stable = setT(function () { stable = null; attempt = 0; }, STABLE_MS);
               send({ type: 'SUBSCRIBE' });
               setStatus('ready');
               resolve();
@@ -110,6 +128,7 @@
             sock.onclose = function () {
               if (sock !== ws) return;
               ws = null;
+              clearStable();
               if (closed) return;
               setStatus('offline');
               scheduleReconnect();
@@ -134,6 +153,7 @@
       onStatus: function (cb) { statusCbs.push(cb); },
       close: function () {
         closed = true;
+        clearStable();
         if (timer) { clearT(timer); timer = null; }
         if (ws) { var s = ws; ws = null; try { s.close(); } catch (e) {} }
       }

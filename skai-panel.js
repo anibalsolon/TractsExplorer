@@ -19,7 +19,7 @@
     template: `
   <aside class="skai-panel" :class="{ collapsed: !open || !signedIn, drawer: isNarrow }" aria-label="SKAI assistant">
     <div v-if="!signedIn" class="skai-rail">
-      <a class="skai-login" :href="loginHref()" @click.prevent="login">Log in to ask SKAI</a>
+      <a class="skai-login" :href="loginHref()" @click.prevent="login">{{ status === 'login' ? 'Your brainlife login expired — log in again to ask SKAI' : 'Log in to ask SKAI' }}</a>
     </div>
     <div v-else-if="!open" class="skai-rail">
       <button class="skai-rail-btn" @click="toggle" aria-label="Open the SKAI assistant" title="Ask SKAI">

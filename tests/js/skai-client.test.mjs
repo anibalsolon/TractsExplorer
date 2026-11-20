@@ -52,8 +52,10 @@ function okRoutes() {
 
 function fakeTimers() {
   const pending = [];
-  const setTimeout = (fn, ms) => { pending.push({ fn, ms }); return pending.length; };
-  return { setTimeout, clearTimeout() {}, pending };
+  let next = 0;
+  const setTimeout = (fn, ms) => { const id = ++next; pending.push({ fn, ms, id }); return id; };
+  const clearTimeout = id => { const i = pending.findIndex(t => t.id === id); if (i >= 0) pending.splice(i, 1); };
+  return { setTimeout, clearTimeout, pending };
 }
 
 const flush = () => new Promise(r => setImmediate(r));
@@ -138,6 +140,61 @@ test('WebSocket close -> offline, then a reconnect with a fresh ticket and backo
   assert.equal(WebSocket.sockets.length, 2);
   WebSocket.sockets[1].drop();   // dropped before opening: backoff grows
   assert.ok(timers.pending[1].ms > first);
+});
+
+test('open then immediate server close keeps backing off (no 1 s loop)', async () => {
+  const { ws, timers, WebSocket } = await connected();
+  ws.drop();
+  const delays = [timers.pending.at(-1).ms];
+  for (let i = 0; i < 4; i++) {
+    const t = timers.pending.at(-1);
+    timers.pending.splice(timers.pending.indexOf(t), 1);
+    t.fn();
+    await flush();
+    const sock = WebSocket.sockets.at(-1);
+    sock.open();   // SKAI accepts the handshake...
+    sock.drop();   // ...then closes (bad ticket / no session)
+    delays.push(timers.pending.at(-1).ms);
+  }
+  for (let i = 1; i < delays.length; i++) assert.ok(delays[i] > delays[i - 1], delays.join(','));
+});
+
+test('a connection that lasts or hears from the server resets the backoff', async () => {
+  const { ws, timers, WebSocket } = await connected();
+  ws.drop();
+  let t = timers.pending.at(-1); timers.pending.splice(timers.pending.indexOf(t), 1); t.fn(); await flush();
+  WebSocket.sockets.at(-1).open();
+  WebSocket.sockets.at(-1).receive({ sessionId: 'S1', message: { type: 'MESSAGE_DEFER', content: {} } });
+  WebSocket.sockets.at(-1).drop();
+  assert.equal(timers.pending.at(-1).ms, 1000);
+  t = timers.pending.at(-1); timers.pending.splice(timers.pending.indexOf(t), 1); t.fn(); await flush();
+  WebSocket.sockets.at(-1).open();
+  const stable = timers.pending.find(x => x.ms === 10000);
+  timers.pending.splice(timers.pending.indexOf(stable), 1); stable.fn();   // 10 s up
+  WebSocket.sockets.at(-1).drop();
+  assert.equal(timers.pending.at(-1).ms, 1000);
+});
+
+test('JWT expired mid-chat -> login on reconnect, no /ticket call, no retry loop', async () => {
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  const jwt = jwtWith({ sub: 1, exp });
+  const fetch = fakeFetch(okRoutes());
+  const WebSocket = fakeWebSocketClass();
+  const timers = fakeTimers();
+  const client = TESkai.createClient({ skaiUrl: 'https://skai.test', jwt, fetch, WebSocket, ...timers });
+  const statuses = [];
+  client.onStatus(s => statuses.push(s));
+  const p = client.connect(); await flush(); WebSocket.sockets[0].open(); await p;
+  const realNow = Date.now;
+  Date.now = () => (exp + 60) * 1000;   // an hour later the token has expired
+  try {
+    WebSocket.sockets[0].drop();
+    const t = timers.pending.at(-1); timers.pending.splice(timers.pending.indexOf(t), 1); t.fn();
+    await flush();
+  } finally { Date.now = realNow; }
+  assert.deepEqual(statuses, ['connecting', 'ready', 'offline', 'login']);
+  assert.equal(fetch.calls.filter(c => c.url.endsWith('/ticket')).length, 1);
+  assert.equal(timers.pending.filter(x => x.ms !== 10000).length, 0);
 });
 
 test('close() stops reconnecting', async () => {
