@@ -95,13 +95,20 @@ def parse_back(url):
 
 
 def test_view_url(client):
-    u = client.get("/api/view-url?thr=0.10&cluster=2&atlas=TY7").json()["view_url"]
+    body = client.get("/api/view-url?thr=0.10&cluster=2&atlas=TY7").json()
+    assert body["threshold"]["id"] == "thr-10"
+    u = body["view_url"]
     assert u == PUB + "/explorer.html?thr=thr-10&cluster=2&atlas=TY7"
     assert parse_back(u) == {"thr": "thr-10", "cluster": "2", "atlas": "TY7"}
     # key order is fixed regardless of request order
     u = client.get("/api/view-url?atlas=TY7&tab=tract&tract=leftArc&thr=default&hemi=lh").json()["view_url"]
     assert urlsplit(u).query == "thr=thr-15&tab=tract&tract=leftArc&hemi=lh&atlas=TY7"
-    assert client.get("/api/view-url").json()["view_url"] == PUB + "/explorer.html"
+    body = client.get("/api/view-url?cluster=1").json()
+    assert body["threshold"]["id"] == "thr-15"
+    assert body["view_url"] == PUB + "/explorer.html?thr=thr-15&cluster=1"
+    assert client.get("/api/view-url").json()["view_url"] == PUB + "/explorer.html?thr=thr-15"
+    r = client.get("/api/view-url?thr=9.9")
+    assert r.status_code == 404 and set(r.json()) == {"error", "hint"}
 
 
 def test_static(client):

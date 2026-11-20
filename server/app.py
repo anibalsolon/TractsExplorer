@@ -110,14 +110,12 @@ def create_app(root: Path, public_url: str, root_path: str = "") -> FastAPI:
     @app.get("/api/view-url")
     def view_url_route(request: Request):
         q = request.query_params
-        out = {}
-        for k in VIEW_KEYS:
+        out = {"thr": repo.resolve_threshold(q.get("thr"))}
+        for k in VIEW_KEYS[1:]:
             if k not in q:
                 continue
             v = q[k]
-            if k == "thr":
-                out[k] = repo.resolve_threshold(v)
-            elif k in ENUMS:
+            if k in ENUMS:
                 if v not in ENUMS[k]:
                     raise BadRequest(f"Invalid {k} '{v}'.", f"{k} must be one of: {', '.join(ENUMS[k])}.")
                 out[k] = v
@@ -129,7 +127,8 @@ def create_app(root: Path, public_url: str, root_path: str = "") -> FastAPI:
                 if not ID_RE.match(v):
                     raise BadRequest(f"Invalid {k} '{v}'.", f"{k} may only contain letters, digits and underscores.")
                 out[k] = v
-        return {"view_url": public_url + "/explorer.html" + to_query(out)}
+        return {"threshold": thr_info(out["thr"]),
+                "view_url": public_url + "/explorer.html" + to_query(out)}
 
     @app.get("/api/{thr}/clusters")
     def clusters(thr: str, atlas: str | None = None):
