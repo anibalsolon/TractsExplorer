@@ -1570,9 +1570,17 @@ ${SURF_PANEL_TEMPLATE}
       });
     },
     observeSections() {
-      if (this._secObs) this._secObs.disconnect();
       const root = this.$el.querySelector('.tab-panel');
-      const secs = this.$el.querySelectorAll('section.subpanel[data-section]');
+      const secs = Array.from(this.$el.querySelectorAll('section.subpanel[data-section]'));
+      // Called after every re-render: keep the observer while the sections are
+      // the same elements. A new observer reports every section at once and
+      // would re-pick the most visible one, overriding the chosen sub-tab.
+      const same = this._secObs && root === this._secRoot &&
+        secs.length === this._secEls.length && secs.every((el, i) => el === this._secEls[i]);
+      if (same) return;
+      if (this._secObs) { this._secObs.disconnect(); this._secObs = null; }
+      this._secRoot = root;
+      this._secEls = secs;
       if (!root || !secs.length || typeof IntersectionObserver === 'undefined') return;
       this._secObs = new IntersectionObserver(entries => {
         const vis = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
