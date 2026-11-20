@@ -1333,7 +1333,9 @@ ${SURF_PANEL_TEMPLATE}
     syncUrl() {
       if (!this._urlReady || this.loading) return;
       const q = TEView.toQuery(this.currentView);
-      if (q !== location.search || location.hash) history.replaceState(null, '', location.pathname + q);
+      if (q === location.search && !location.hash) return;
+      // Safari throws once replaceState is called too often; the next change syncs again.
+      try { history.replaceState(null, '', location.pathname + q); } catch (e) {}
     },
 
     // ── Intro tour ────────────────────────────────────────────────
