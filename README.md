@@ -174,11 +174,11 @@ Example: `explorer.html?thr=0.15&tab=tract&tract=leftArc&atlas=AS200Y17`. Parsin
 
 ## Running the server
 
-A small FastAPI app in `server/` serves the static site and a read-only JSON API over the same CSV files.
+A small FastAPI app in `server/` serves the static site and a read-only JSON API over the same CSV files. It needs Python 3.10 or newer (macOS's `/usr/bin/python3` is 3.9: use a newer one, e.g. from Homebrew or conda).
 
 ```bash
 python3 -m venv server/.venv
-server/.venv/bin/pip install -r server/requirements.txt
+server/.venv/bin/pip install -r server/requirements.txt       # tests: requirements-dev.txt (see Tests)
 server/.venv/bin/uvicorn app:app --app-dir server      # http://localhost:8000
 ```
 
@@ -188,17 +188,19 @@ server/.venv/bin/uvicorn app:app --app-dir server      # http://localhost:8000
 | `ROOT_PATH` | empty | reverse-proxy prefix (e.g. `/tractexplorer`) |
 | `TE_ROOT` | the repo root | folder holding `config.json`, `testdata/` and `assets/` |
 
-The server only serves an allow-list of static files (the HTML/JS/CSS at the top level plus `assets/`, `testdata/`), never dotfiles or the server code.
+The server only serves an allow-list of static files (the HTML/JS/CSS at the top level plus `assets/`, `testdata/`), never dotfiles or the server code. `testdata/` may be a symlink (e.g. to a data volume); links inside it must stay inside it.
+
+Behind a reverse proxy at a prefix (e.g. `/tractexplorer`): if the proxy passes the prefix through, set `ROOT_PATH` and the app itself redirects a bare `/tractexplorer` to `/tractexplorer/` (needed so the page's relative asset paths resolve). If the proxy strips the prefix, the app cannot see the difference, so add that redirect as a proxy rule. Run uvicorn with `--proxy-headers` (and `--forwarded-allow-ips` set to the proxy) so redirects keep the public scheme and host.
 
 ## API
 
-All responses are JSON. Every response that depends on a threshold includes a `threshold` object saying which one was used, and every result carries a `view_url` that opens the matching view in the explorer.
+All responses are JSON. Responses that depend on a threshold (`/api/view-url` and the `/api/{thr}/...` routes) include a `threshold` object saying which one was used. Results for clusters and tracts include a `view_url` that opens the matching view in the explorer; `/api/thresholds` and `/api/topics` have neither.
 
 | Endpoint | Returns |
 |---|---|
 | `GET /api/thresholds` | available thresholds and the default |
 | `GET /api/topics?q=` | topics matching a keyword |
-| `GET /api/view-url?thr=&tab=&cluster=&tract=&...` | a validated explorer link (same parameters as *View links*) |
+| `GET /api/view-url?thr=&tab=&cluster=&tract=&...` | a validated explorer link (same parameters as *View links*; an unknown tract, cluster or atlas is a 404) |
 | `GET /api/{thr}/clusters` | the clusters |
 | `GET /api/{thr}/clusters/{n}?atlas=&limit=` | one cluster: member tracts, top topics, networks |
 | `GET /api/{thr}/tracts?q=` | find tracts by name (`leftArc` or "left arcuate") |
@@ -219,13 +221,17 @@ The explorer can embed a chat panel for [SKAI](https://github.com/brainlife/brai
 
 - For development, put a token in `localStorage['tractexplorer.devJwt']`.
 - SKAI answers using its TractsExplorer tool server (in the `brainlife-assistant` repo), which calls this API. The panel has no client-side tool: it finds explorer links in SKAI's replies and applies them to the view, and each such answer gets a "Showing: ..." chip to reopen it.
+- Each question is sent with a short line saying what the explorer shows, e.g. `(Viewing in TractsExplorer: threshold thr-15 · tract leftArc)`, so "this tract" means something; the chat shows only the question. When SKAI asks something back, its question (and any options) appears in the chat and the next reply answers it.
 - For deployment, SKAI must list the explorer's origin in its `WHITELISTED_ORIGINS`.
+- Set `config.skai.url` only in the brainlife.io deployment. Elsewhere (e.g. GitHub Pages) there is no brainlife login to read, so the panel could only ever show "Log in".
+- All open explorer tabs share one SKAI session ("TractsExplorer"), so an answer to a question asked in one tab also moves the view in the others.
 
 **Open question — login hand-off.** The panel's login link currently sends users to `config.skai.loginUrl` with `?redirect=<current page>`, but brainlife's auth redirects back differently, so this needs confirming. Also, `localStorage['jwt']` is only visible on brainlife's own origin: fine when the explorer is at `brainlife.io/tractexplorer`, to be confirmed at deployment. SKAI's `/ticket` may also answer 500 rather than 401 for a bad token, in which case the panel would show "offline" rather than asking for a new login.
 
 ## Tests
 
 ```bash
+server/.venv/bin/pip install -r server/requirements-dev.txt   # once: pytest, httpx, scipy
 server/.venv/bin/python -m pytest server/tests -W error
 node --test tests/js/*.test.mjs        # list the files; the directory form fails on Node 25
 ```

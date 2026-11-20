@@ -1,6 +1,3 @@
-fastapi
-uvicorn[standard]
-pandas
-httpx
-pytest
-scipy
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pandas>=2.0
