@@ -8,6 +8,8 @@
   var JWT_KEYS = ['jwt', 'tractexplorer.devJwt'];   // brainlife.io's key, then a dev override
   var BACKOFF_MS = 1000, BACKOFF_MAX_MS = 30000;
   var STABLE_MS = 10000;   // a socket up this long (or one that hears back) resets the backoff
+  var FETCH_TIMEOUT_MS = 15000;   // /ticket and /sessions
+  var REPLY_TIMEOUT_MS = 120000;  // silence after a question before giving up on the answer
 
   function view() { return root.TEView || (typeof TEView !== 'undefined' ? TEView : null); }
 
@@ -48,8 +50,11 @@
     var WS = opts.WebSocket;
     var setT = opts.setTimeout || setTimeout, clearT = opts.clearTimeout || clearTimeout;
     var sessionName = opts.sessionName || 'TractsExplorer';
+    var fetchTimeout = opts.fetchTimeoutMs || FETCH_TIMEOUT_MS;
+    var replyTimeout = opts.replyTimeoutMs || REPLY_TIMEOUT_MS;
     var msgCbs = [], statusCbs = [];
     var ws = null, sessionId = null, timer = null, stable = null, attempt = 0, closed = false, status = null;
+    var waiting = null;   // reply timer while a question is unanswered
 
     function setStatus(s) {
       if (s === status) return;
@@ -77,13 +82,31 @@
       return true;
     }
     function clearStable() { if (stable) { clearT(stable); stable = null; } }
+    function emit(m) { msgCbs.forEach(function (cb) { cb(m); }); }
+    // While a question is unanswered, every frame restarts the reply timer;
+    // an answer (TEXT) or a question back (FORM) ends the wait.
+    function stopWaiting() { if (waiting) { clearT(waiting); waiting = null; } }
+    function wait() {
+      stopWaiting();
+      waiting = setT(function () { waiting = null; emit({ type: 'REPLY_TIMEOUT' }); }, replyTimeout);
+    }
     function onFrame(ev) {
       var frame;
       try { frame = JSON.parse(ev.data); } catch (e) { return; }
       attempt = 0;   // the server is really talking to us
       var m = frame && frame.message;
       if (!m || typeof m !== 'object' || m.type === 'PONG') return;
-      msgCbs.forEach(function (cb) { cb(m); });
+      if (waiting) { if (m.type === 'TEXT' || m.type === 'FORM') stopWaiting(); else wait(); }
+      emit(m);
+    }
+    // fetch that gives up after fetchTimeout (AbortController where available).
+    function fetchT(url, init) {
+      var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      if (ctl) init.signal = ctl.signal;
+      var t = setT(function () { if (ctl) ctl.abort(); }, fetchTimeout);
+      return doFetch(url, init).then(
+        function (r) { clearT(t); return r; },
+        function (e) { clearT(t); throw e; });
     }
 
     function connect() {
@@ -98,10 +121,10 @@
         return Promise.reject(e);
       }
       setStatus('connecting');
-      return doFetch(base + '/ticket', { headers: authed({}) })
+      return fetchT(base + '/ticket', { headers: authed({}) })
         .then(check)
         .then(function (t) {
-          return doFetch(base + '/sessions', {
+          return fetchT(base + '/sessions', {
             method: 'POST', headers: authed({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ name: sessionName })
           }).then(check).then(function (s) { return { ticket: t.ticket, session: s.session }; });
@@ -129,6 +152,7 @@
               if (sock !== ws) return;
               ws = null;
               clearStable();
+              stopWaiting();
               if (closed) return;
               setStatus('offline');
               scheduleReconnect();
@@ -145,15 +169,29 @@
     return {
       connect: connect,
       retry: function () { attempt = 0; return connect(); },
-      ask: function (text) { return send({ type: 'TEXT', content: String(text) }); },
-      sendContext: function (v) {
-        return send({ type: 'CONTEXT', content: { platform: 'tractexplorer', data: { view: v || {} } } });
+      // A question, prefixed with a line saying what the explorer shows
+      // (SKAI keeps no per-message context of its own).
+      ask: function (text, view) {
+        var line = contextLine(view);
+        var ok = send({ type: 'TEXT', content: (line ? line + '\n\n' : '') + String(text) });
+        if (ok) wait();
+        return ok;
+      },
+      // The user's reply to a FORM (SKAI's ask_user): form = classify(FORM).
+      answer: function (form, text) {
+        var ok = send({ type: 'FORM_RESPONSE', content: {
+          reference: form.reference,
+          responses: [{ id: form.field, value: String(text) }]
+        } });
+        if (ok) wait();
+        return ok;
       },
       onMessage: function (cb) { msgCbs.push(cb); },
       onStatus: function (cb) { statusCbs.push(cb); },
       close: function () {
         closed = true;
         clearStable();
+        stopWaiting();
         if (timer) { clearT(timer); timer = null; }
         if (ws) { var s = ws; ws = null; try { s.close(); } catch (e) {} }
       }
@@ -161,12 +199,26 @@
   }
 
   // ── Incoming messages ───────────────────────────────────────────
-  // TEXT -> answer; reasoning / job progress -> one-line status; the rest
-  // (MESSAGE_DEFER echo, PROVENANCE, CONTEXT, FORM, CLIENT_TOOL...) is ignored.
+  // TEXT -> answer; FORM (SKAI asking back) -> question + options to reply
+  // to; reasoning / job progress -> one-line status; REPLY_TIMEOUT (from the
+  // client) -> give up; the rest (MESSAGE_DEFER echo, PROVENANCE, CONTEXT,
+  // CLIENT_TOOL...) is ignored.
   function classify(m) {
     if (!m || typeof m !== 'object') return { kind: 'ignore' };
     var c = m.content;
     if (m.type === 'TEXT') return typeof c === 'string' ? { kind: 'text', text: c } : { kind: 'ignore' };
+    if (m.type === 'FORM') {
+      // SKAI's ask_user sends one field: {id, label: question, options?: [{id, option}]}.
+      var f = c && Array.isArray(c.fields) && c.fields[0];
+      if (!f || typeof f !== 'object' || !f.label) return { kind: 'ignore' };
+      return {
+        kind: 'form', text: String(f.label), reference: m.id, field: f.id || 'answer',
+        options: (Array.isArray(f.options) ? f.options : []).map(function (o) {
+          return String(o && typeof o === 'object' ? (o.option || o.id) : o);
+        })
+      };
+    }
+    if (m.type === 'REPLY_TIMEOUT') return { kind: 'timeout', text: "SKAI didn't answer — try again." };
     if (m.type === 'REASONING_STEP') {
       if (!c || c.phase === 'final_answer') return { kind: 'ignore' };
       return { kind: 'thinking', text: c.tool_name ? 'Thinking… (' + c.tool_name + ')' : 'Thinking…' };
@@ -175,15 +227,42 @@
     return { kind: 'ignore' };
   }
 
-  // ── Links ───────────────────────────────────────────────────────
-  var LINK_RE = /\[([^\]\n]*)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()\[\]"'`]+)/g;
-  function trimUrl(u) { return u.replace(/[.,;:!?*_]+$/, ''); }
+  // ── Context line ────────────────────────────────────────────────
+  // "(Viewing in TractsExplorer: threshold thr-15 · tract leftArc)" from a
+  // view (currentView plus thr); '' when there is no threshold to report.
+  function contextLine(v) {
+    if (!v || !v.thr) return '';
+    var parts = ['threshold ' + v.thr];
+    if (v.tab === 'matrix') parts.push('matrix');
+    if (v.cluster) parts.push('cluster ' + v.cluster);
+    if (v.tract) parts.push('tract ' + v.tract);
+    if (v.topic) parts.push('topic ' + v.topic);
+    if (v.section && v.section !== 'map') parts.push(v.section);
+    if (v.atlas) parts.push('atlas ' + v.atlas);
+    return '(Viewing in TractsExplorer: ' + parts.join(' · ') + ')';
+  }
 
-  // View params of every link in `text` that opens this explorer, in order.
+  // ── Links ───────────────────────────────────────────────────────
+  // Code spans come first so that URLs inside them are skipped, as the
+  // renderer shows them as code rather than links.
+  var LINK_RE = /`[^`\n]+`|\[([^\]\n]*)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()\[\]"'`]+)/g;
+  function trimUrl(u) { return u.replace(/[.,;:!?*_]+$/, ''); }
+  function withoutFences(text) {
+    var out = [], fenced = false;
+    String(text || '').replace(/\r\n?/g, '\n').split('\n').forEach(function (line) {
+      if (/^\s*```/.test(line)) fenced = !fenced;
+      else if (!fenced) out.push(line);
+    });
+    return out.join('\n');
+  }
+
+  // View params of every link in `text` that opens this explorer, in order
+  // (not counting code spans and fenced code blocks).
   function explorerLinks(text, baseUrl, cfg) {
-    var out = [], m, TV = view();
+    var out = [], m, TV = view(), src = withoutFences(text);
     LINK_RE.lastIndex = 0;
-    while ((m = LINK_RE.exec(String(text || '')))) {
+    while ((m = LINK_RE.exec(src))) {
+      if (m[0].charAt(0) === '`') continue;
       var url = m[2] || trimUrl(m[3]);
       if (!/^https?:\/\//i.test(url)) continue;
       var p = TV.fromUrl(url, baseUrl, cfg);
@@ -277,7 +356,7 @@
   }
 
   var TESkai = {
-    getJwt: getJwt, createClient: createClient, classify: classify,
+    getJwt: getJwt, createClient: createClient, classify: classify, contextLine: contextLine,
     explorerLinks: explorerLinks, summarize: summarize, renderMarkdown: renderMarkdown
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = TESkai;

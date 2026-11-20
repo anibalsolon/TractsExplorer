@@ -44,6 +44,10 @@
           <div v-if="m.role === 'user'" class="skai-bubble">{{ m.text }}</div>
           <template v-else>
             <div class="skai-md" v-html="m.html"></div>
+            <div v-if="m.form && m.form.options.length" class="skai-starters">
+              <button v-for="o in m.form.options" :key="o" class="skai-starter"
+                :disabled="status !== 'ready' || pendingForm !== m.form" @click="ask(o)">{{ o }}</button>
+            </div>
             <button v-if="m.view" class="skai-chip" @click="show(m.view)" title="Open this view in the explorer">Showing: {{ m.summary }}</button>
           </template>
         </div>
@@ -66,6 +70,7 @@
         isNarrow: narrow(),
         messages: [],
         thinking: '',
+        pendingForm: null,   // SKAI asked a question back: the next reply answers it
         draft: '',
         starters: STARTERS
       };
@@ -110,12 +115,23 @@
       },
       retry: function () { if (this.client) this.client.retry().catch(function () {}); },
 
+      // What the explorer shows, for the context line SKAI gets with a question.
+      viewContext: function () {
+        var ex = window.teExplorer;
+        if (!ex) return null;
+        var v = { thr: ex.thresholdFolder };
+        var cur = ex.currentView || {};
+        for (var k in cur) v[k] = cur[k];
+        return v;
+      },
+
       ask: function (text) {
         text = String(text || '').trim();
         if (!text || !this.client || this.status !== 'ready') return;
-        var ex = window.teExplorer;
-        if (ex) this.client.sendContext(ex.currentView);
-        if (!this.client.ask(text)) return;
+        var form = this.pendingForm;
+        var sent = form ? this.client.answer(form, text) : this.client.ask(text, this.viewContext());
+        if (!sent) return;
+        this.pendingForm = null;
         this.push({ role: 'user', text: text });
         this.draft = '';
         this.thinking = 'Thinking…';
@@ -124,14 +140,28 @@
       receive: function (m) {
         var c = TESkai.classify(m);
         if (c.kind === 'thinking') { this.thinking = c.text; this.scroll(); return; }
-        if (c.kind !== 'text') return;
+        if (c.kind === 'timeout') {
+          if (!this.thinking) return;
+          this.thinking = '';
+          this.push({ role: 'agent', html: TESkai.renderMarkdown(c.text) });
+          return;
+        }
         var base = explorerBase(), cfg = this.config;
+        var isInternal = function (url) { return TEView.fromUrl(url, base, cfg) !== null; };
+        if (c.kind === 'form') {
+          this.thinking = '';
+          this.pendingForm = c;
+          this.push({ role: 'agent', html: TESkai.renderMarkdown(c.text, isInternal), form: c });
+          return;
+        }
+        if (c.kind !== 'text') return;
+        this.pendingForm = null;
         var views = TESkai.explorerLinks(c.text, base, cfg);
         var last = views.length ? views[views.length - 1] : null;
         this.thinking = '';
         this.push({
           role: 'agent',
-          html: TESkai.renderMarkdown(c.text, function (url) { return TEView.fromUrl(url, base, cfg) !== null; }),
+          html: TESkai.renderMarkdown(c.text, isInternal),
           view: last,
           summary: last ? TESkai.summarize(last) : ''
         });

@@ -210,13 +210,84 @@ test("ask('hi') sends the TEXT frame", async () => {
   assert.deepEqual(ws.sent[1], { sessionId: 'S1', message: { type: 'TEXT', content: 'hi' } });
 });
 
-test('sendContext sends a tractexplorer CONTEXT frame', async () => {
+test('ask(text, view) puts a context line before the question; no CONTEXT frame', async () => {
   const { client, ws } = await connected();
-  client.sendContext({ cluster: 2, topic: 5 });
+  client.ask('Which topics?', { thr: 'thr-15', tab: 'tract', tract: 'leftArc' });
   assert.deepEqual(ws.sent[1], {
     sessionId: 'S1',
-    message: { type: 'CONTEXT', content: { platform: 'tractexplorer', data: { view: { cluster: 2, topic: 5 } } } },
+    message: { type: 'TEXT', content: '(Viewing in TractsExplorer: threshold thr-15 · tract leftArc)\n\nWhich topics?' },
   });
+  assert.ok(!ws.sent.some(f => f.message.type === 'CONTEXT'));
+});
+
+test('contextLine: threshold always, selection only when there is one', () => {
+  assert.equal(TESkai.contextLine({ thr: 'thr-15' }), '(Viewing in TractsExplorer: threshold thr-15)');
+  assert.equal(TESkai.contextLine({ thr: 'thr-10', cluster: 2, topic: 5, section: 'networks', atlas: 'TY7' }),
+    '(Viewing in TractsExplorer: threshold thr-10 · cluster 2 · topic 5 · networks · atlas TY7)');
+  assert.equal(TESkai.contextLine({ thr: 'thr-15', tab: 'matrix' }), '(Viewing in TractsExplorer: threshold thr-15 · matrix)');
+  assert.equal(TESkai.contextLine(undefined), '');
+  assert.equal(TESkai.contextLine({}), '');
+});
+
+const FORM = {
+  type: 'FORM', id: 'F1', author: 'AGENT',
+  content: { fields: [{ id: 'answer', label: 'Which hemisphere?', required: true, type: 'ENUM_INPUT',
+    options: [{ id: 'left', option: 'left' }, { id: 'right', option: 'right' }], multiple: false }] },
+};
+
+test('answer(form, text) sends a FORM_RESPONSE referencing the FORM', async () => {
+  const { client, ws } = await connected();
+  assert.equal(client.answer(TESkai.classify(FORM), 'left'), true);
+  assert.deepEqual(ws.sent[1], {
+    sessionId: 'S1',
+    message: { type: 'FORM_RESPONSE', content: { reference: 'F1', responses: [{ id: 'answer', value: 'left' }] } },
+  });
+});
+
+test('no frame for a while after a question -> REPLY_TIMEOUT; frames restart the wait', async () => {
+  const { client, ws, timers } = await connected({ replyTimeoutMs: 500 });
+  const got = [];
+  client.onMessage(m => got.push(m));
+  const replyTimers = () => timers.pending.filter(t => t.ms === 500);
+  client.ask('hi');
+  assert.equal(replyTimers().length, 1);
+  ws.receive({ sessionId: 'S1', message: { type: 'REASONING_STEP', content: { phase: 'thought' } } });
+  assert.equal(replyTimers().length, 1);   // restarted, not stacked
+  const t = replyTimers()[0];
+  timers.clearTimeout(t.id);   // the fake timers leave fired ones pending
+  t.fn();
+  assert.deepEqual(got.at(-1), { type: 'REPLY_TIMEOUT' });
+  assert.equal(TESkai.classify(got.at(-1)).kind, 'timeout');
+  // an answer ends the wait
+  client.ask('again');
+  ws.receive({ sessionId: 'S1', message: { type: 'TEXT', content: 'done' } });
+  assert.equal(replyTimers().length, 0);
+  // so does a question back, and so does closing
+  client.ask('more');
+  ws.receive({ sessionId: 'S1', message: FORM });
+  assert.equal(replyTimers().length, 0);
+  client.ask('last');
+  client.close();
+  assert.equal(replyTimers().length, 0);
+});
+
+test('/ticket that never answers times out -> offline and a retry is scheduled', async () => {
+  let signal;
+  const fetch = (url, opts) => { signal = opts.signal; return new Promise((_, reject) => {
+    opts.signal.addEventListener('abort', () => reject(new Error('aborted')));
+  }); };
+  const timers = fakeTimers();
+  const client = TESkai.createClient({ skaiUrl: 'https://skai.test', jwt: 'JWT', fetch, WebSocket: fakeWebSocketClass(),
+    fetchTimeoutMs: 15000, ...timers });
+  const statuses = [];
+  client.onStatus(s => statuses.push(s));
+  const p = client.connect();
+  const t = timers.pending.find(x => x.ms === 15000);
+  assert.ok(t && signal && !signal.aborted);
+  t.fn();
+  await p.catch(() => {});
+  assert.deepEqual(statuses, ['connecting', 'offline']);
+  assert.equal(timers.pending.filter(x => x.ms !== 15000).length, 1);   // the reconnect
 });
 
 test('ask before the socket is ready returns false and sends nothing', () => {
@@ -242,10 +313,17 @@ test('classify: TEXT renders, progress -> thinking line, the rest ignored', () =
   assert.match(TESkai.classify({ type: 'REASONING_STEP', content: { phase: 'action', tool_name: 'search' } }).text, /search/);
   assert.equal(TESkai.classify({ type: 'REASONING_STEP', content: { phase: 'final_answer' } }).kind, 'ignore');
   assert.equal(TESkai.classify({ type: 'TASK_STATUS', content: { status_text: 'Running' } }).kind, 'thinking');
-  for (const type of ['MESSAGE_DEFER', 'CLIENT_TOOL', 'PROVENANCE', 'CONTEXT', 'FORM', 'WHATEVER'])
+  for (const type of ['MESSAGE_DEFER', 'CLIENT_TOOL', 'PROVENANCE', 'CONTEXT', 'FORM', 'WHATEVER'])   // FORM without fields
     assert.equal(TESkai.classify({ type, content: {} }).kind, 'ignore');
   assert.equal(TESkai.classify({ type: 'TEXT', content: { not: 'a string' } }).kind, 'ignore');
   assert.equal(TESkai.classify(null).kind, 'ignore');
+});
+
+test('classify: FORM -> its question, options, and what to reference in the reply', () => {
+  assert.deepEqual(TESkai.classify(FORM),
+    { kind: 'form', text: 'Which hemisphere?', reference: 'F1', field: 'answer', options: ['left', 'right'] });
+  const free = { type: 'FORM', id: 'F2', content: { fields: [{ id: 'answer', label: 'Which tract?', type: 'TEXT_INPUT' }] } };
+  assert.deepEqual(TESkai.classify(free).options, []);
 });
 
 // ── explorer links ────────────────────────────────────────────────
@@ -259,6 +337,11 @@ test('explorerLinks trims trailing punctuation and handles none', () => {
   assert.deepEqual(TESkai.explorerLinks('**https://b.io/te/explorer.html?cluster=1**', BASE, cfg), [{ cluster: 1 }]);
   assert.deepEqual(TESkai.explorerLinks('no links here', BASE, cfg), []);
   assert.deepEqual(TESkai.explorerLinks('[x](javascript:alert(1))', BASE, cfg), []);
+});
+
+test('explorerLinks skips URLs in code spans and fenced code', () => {
+  const text = 'Example: `https://b.io/te/explorer.html?cluster=1`\n```\nhttps://b.io/te/explorer.html?cluster=2\n```\nSee https://b.io/te/explorer.html?cluster=3';
+  assert.deepEqual(TESkai.explorerLinks(text, BASE, cfg), [{ cluster: 3 }]);
 });
 
 // ── JWT ───────────────────────────────────────────────────────────
