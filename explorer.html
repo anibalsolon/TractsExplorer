@@ -16,6 +16,10 @@
 <body class="explorer">
 <div id="app" v-cloak>
   <div v-if="error" class="error-msg">{{ error }}</div>
+  <div v-else-if="skaiOn" class="te-layout">
+    <skai-panel :config="config"></skai-panel>
+    <wmc-viewer :config="config"></wmc-viewer>
+  </div>
   <wmc-viewer v-else :config="config"></wmc-viewer>
 </div>
 
@@ -24,6 +28,8 @@
 <script src="cluster.js"></script>  <!-- hierarchical clustering + dendrogram -->
 <script src="view-state.js"></script>  <!-- view links: parse / build explorer URLs -->
 <script src="viewer.js"></script>   <!-- main viewer component -->
+<script src="skai-client.js"></script>  <!-- SKAI (brainlife.io assistant) client -->
+<script src="skai-panel.js"></script>   <!-- SKAI side panel (only when config.skai.url is set) -->
 <script>
   // Settings live in config.json (shared with the Python API).
   fetch('config.json')
@@ -32,10 +38,14 @@
       return r.json();
     })
     .then(function (config) {
-      new Vue({ el: '#app', data: { error: null, config: config } });
+      new Vue({
+        el: '#app',
+        data: { error: null, config: config },
+        computed: { skaiOn: function () { return !!(this.config.skai && this.config.skai.url); } }
+      });
     })
     .catch(function (e) {
-      new Vue({ el: '#app', data: { error: 'Could not load config.json: ' + e.message, config: null } });
+      new Vue({ el: '#app', data: { error: 'Could not load config.json: ' + e.message, config: null, skaiOn: false } });
     });
 </script>
 </body>
