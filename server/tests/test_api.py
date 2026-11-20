@@ -136,6 +136,28 @@ def test_static(client):
         assert client.get(p).status_code == 404, p
 
 
+def test_static_symlinked_data_dir(tmp_path):
+    # testdata may be a symlink to a data volume; its files must still be served,
+    # but a symlink inside it that escapes the data dir must not.
+    site = tmp_path / "site"
+    site.mkdir()
+    for name in ("config.json", "explorer.html", "index.html"):
+        (site / name).write_bytes((ROOT / name).read_bytes())
+    (site / "assets").mkdir()
+    (tmp_path / "volume").mkdir()
+    (tmp_path / "volume" / "a.png").write_bytes(b"png")
+    (tmp_path / "secret.txt").write_text("no")
+    (tmp_path / "volume" / "leak.txt").symlink_to(tmp_path / "secret.txt")
+    (site / "testdata").symlink_to(tmp_path / "volume")
+    (site / "assets" / "leak.txt").symlink_to(tmp_path / "secret.txt")
+    c = TestClient(create_app(site, PUB))
+    r = c.get("/testdata/a.png")
+    assert r.status_code == 200 and r.content == b"png"
+    assert c.get("/testdata/leak.txt").status_code == 404
+    assert c.get("/assets/leak.txt").status_code == 404
+    assert c.get("/explorer.html").status_code == 200
+
+
 def test_cors(client):
     r = client.get("/api/thresholds", headers={"Origin": "https://other.test"})
     assert r.headers["access-control-allow-origin"] == "*"
@@ -146,3 +168,6 @@ def test_root_path_prefix():
     assert c.get("/api/thresholds").status_code == 200
     assert c.get("/tractexplorer/api/thresholds").status_code == 200
     assert c.get("/tractexplorer/explorer.html").status_code == 200
+    # bare prefix -> slash form, so relative assets resolve under the prefix
+    r = c.get("/tractexplorer", follow_redirects=False)
+    assert r.status_code in (301, 307, 308) and r.headers["location"].endswith("/tractexplorer/")

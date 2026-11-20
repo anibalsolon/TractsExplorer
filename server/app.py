@@ -207,8 +207,11 @@ def create_app(root: Path, public_url: str, root_path: str = "") -> FastAPI:
              (parts[0] in STATIC_DIRS and len(parts) > 1)
         if not ok or any(p in ("", ".", "..") or p.startswith(".") or "\\" in p or "\0" in p for p in parts):
             raise StarletteHTTPException(404)
+        # The file must stay inside its allowed directory (which may itself be a
+        # symlink, e.g. testdata -> a data volume), or inside root for top-level files.
+        base = (root / parts[0]).resolve() if len(parts) > 1 else root
         f = (root / rel).resolve()
-        if not f.is_file() or root not in f.parents:
+        if not f.is_file() or base not in f.parents:
             raise StarletteHTTPException(404)
         return FileResponse(f)
 
