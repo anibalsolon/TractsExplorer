@@ -25,7 +25,7 @@ npm start          # http://localhost:3000
 
 `npm start` links `data/` into `static/` and serves it. Opening the HTML files from disk does not work, because the browser blocks loading the data.
 
-The read-only JSON API (`server/`), view links and the SKAI assistant panel are described in [docs/server.md](docs/server.md).
+The website and its view links are described in [static/README.md](static/README.md), and the read-only JSON API in [server/README.md](server/README.md).
 
 ## Tests
 
@@ -42,13 +42,11 @@ On pushes to `main`, GitHub Actions runs the tests and deploys `static/` plus `d
 
 | Path | Contents |
 |---|---|
-| `static/` | the website: `index.html` (landing page), `explorer.html` + `viewer.js` (the tool), `cluster.js` (clustering), `charts.js` (radar, word cloud), `surf3d.js` (3D surfaces), `view-state.js` (view links), `skai-*.js` (assistant panel) |
-| `data/` | configuration, lookup tables and published data, shared by the website and the API |
-| `server/` | FastAPI JSON API |
+| [`static/`](static/README.md) | the website: landing page and explorer, with no build step |
+| [`data/`](data/README.md) | configuration, lookup tables and published data, shared by the website and the API |
+| [`server/`](server/README.md) | read-only JSON API |
 | `scripts/` | offline scripts that build `data/` from the analysis outputs |
 | `tests/` | Python (`tests/server`) and JavaScript (`tests/js`) tests |
-
-The website has no build step; Vue 2, PapaParse, pako and three.js load from a CDN.
 
 ## Credits
 

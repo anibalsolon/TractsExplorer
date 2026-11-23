@@ -126,7 +126,7 @@ def test_view_url_checks_entities(client):
 def test_static_files_are_not_served(client):
     for p in ["/", "/explorer.html", "/view-state.js", "/config.json", "/assets/img/mark.svg",
               "/data/thresholds/thr-15/matrix.csv", "/thresholds/thr-15/matrix.csv", "/server/app.py", "/.git/config",
-              "/package.json", "/scripts/x", "/docs/x", "/.superpowers/x", "/tests/x",
+              "/package.json", "/scripts/x", "/tests/x",
               "/assets/../server/app.py", "/..%2fserver/app.py", "/%2e%2e/server/app.py",
               "/assets/%2e%2e/server/app.py", "/server%2fapp.py", "/nope.html"]:
         assert client.get(p).status_code == 404, p
