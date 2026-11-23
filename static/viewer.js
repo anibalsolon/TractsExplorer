@@ -919,7 +919,6 @@ ${SURF_PANEL_TEMPLATE}
       return v;
     },
 
-    // Threshold config value may be a string (legacy) or an object
     thresholdCfg()    { return this.config.thresholds[this.selectedThreshold]; },
     thresholdFolder() { return this.selectedThreshold; },
     baseUrl()         { return `${DATA_THRESHOLDS}/${this.thresholdFolder}`; },
@@ -1082,7 +1081,6 @@ ${SURF_PANEL_TEMPLATE}
 
     // Sub-tabs under the selection header; one panel at a time.
     subTabs() {
-      const hasSurf = !!(this.surfBase && this.surfMeshBase);
       const hasScores = this.tab === 'cluster' ? !!this.clusterMatrix[this.selectedCluster] : !!this.matrix[this.selectedTract];
       return [
         { id: 'map',      label: 'Overview',           hint: 'Top topics, best networks, what this is',      available: true },

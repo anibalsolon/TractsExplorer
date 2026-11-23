@@ -28,7 +28,7 @@ PREFIX = 'source-neuroquery_desc-lda_'
 
 def rows(name):
     with open(os.path.join(SRC, PREFIX + name + '.csv'), newline='') as f:
-        return list(csv.reader(f))[1:]          # drop header row
+        return list(csv.reader(f))[1:]
 
 
 features, freqs, classes = rows('features'), rows('frequencies'), rows('classification')

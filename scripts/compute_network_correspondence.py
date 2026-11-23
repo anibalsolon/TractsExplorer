@@ -50,7 +50,7 @@ import cbig_network_correspondence as cnc
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(THIS_DIR)
-TESTDATA = os.path.join(REPO_ROOT, "data", "thresholds")
+THRESHOLDS_DIR = os.path.join(REPO_ROOT, "data", "thresholds")
 
 # Atlas codes to compute against — the reference atlases used in the paper:
 # EG17 (Gordon 17-network), TY7 (Yeo 7-network), AS200Y17 (Schaefer 200,
@@ -314,8 +314,8 @@ def main():
     for folder, cfg in THRESHOLDS.items():
         if args.threshold and folder != args.threshold:
             continue
-        thr_dir = os.path.join(TESTDATA, folder)
-        func_dir = os.path.join(TESTDATA, cfg["func_dir"], "func")
+        thr_dir = os.path.join(THRESHOLDS_DIR, folder)
+        func_dir = os.path.join(THRESHOLDS_DIR, cfg["func_dir"], "func")
         matrix_csv = os.path.join(thr_dir, "matrix.csv")
         if not os.path.isdir(func_dir) or not os.path.isfile(matrix_csv):
             print(f"[{folder}] skip — missing func/ or matrix.csv")

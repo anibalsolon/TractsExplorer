@@ -1,6 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────
    charts.js — live Radar + Word Cloud for topic decoding scores
-   Replaces the pre-rendered *_radar.png / *_wordcloud.png images.
    Depends on: Vue 2 only. Both render as SVG on the site's dark ground
    and are coloured with a dim → bright ramp of the given cluster colour,
    so the strongest topics read brightest. Both are interactive: click a
