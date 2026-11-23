@@ -213,23 +213,6 @@ const SURF_PANEL_TEMPLATE = `
             </div>
 `;
 
-// First-visit guide shown at the top of the Cluster / Tract views until dismissed.
-const GUIDE_TEMPLATE = `
-          <div class="guide" v-if="!guideDismissed">
-            <div>
-              <h3>Explore in three steps</h3>
-              <p>This site accompanies Ray et al. — every panel is computed live from the paper's data.</p>
-              <ol>
-                <li><b>Pick a cluster</b> of functionally similar tracts (left panel or dendrogram).</li>
-                <li><b>Choose a tract</b> to see its cortical endpoints and how each endpoint decodes.</li>
-                <li><b>Click a topic bar</b> to read the full term list behind that cognitive topic.</li>
-              </ol>
-            </div>
-            <button class="dismiss" @click="dismissGuide">Got it, hide this</button>
-          </div>
-`;
-
-
 // "At a glance" strip shown under the selection header in both views.
 const GLANCE_TEMPLATE = `
             <aside class="glance" data-tour="glance">
@@ -912,8 +895,6 @@ ${SURF_PANEL_TEMPLATE}
       // Guided tour: spotlight + card over the live page (see tourSteps / startTour)
       tour: { active: false, step: 0, rect: null, place: 'below', cardStyle: {} },
       dendroOpen: true,          // dendrogram shown in the sidebar
-      openClusters: {},          // { clusterId: true } — expanded rows in the sidebar tree
-      guideDismissed: readPref('wmc.guideDismissed') === '1'
     };
   },
 
@@ -1058,22 +1039,6 @@ ${SURF_PANEL_TEMPLATE}
         const hay = `${t} ${tractLabel(t)} ${side || ''}`.toLowerCase();
         return q.split(/\s+/).every(w => hay.includes(w));
       }).sort();
-    },
-
-    // Sidebar tree: one group per cluster (in cluster order) holding its
-    // tracts, plus a "Not clustered" group for tracts without decoding
-    // scores at this threshold. While searching, every match is listed flat.
-    sidebarGroups() {
-      if (this.tractSearch.trim()) {
-        return this.filteredTracts.length ? [{ id: 'all', label: 'Matches', color: null, tracts: this.filteredTracts }] : [];
-      }
-      if (!this.clustersEnabled || !this.clusters.length) {
-        return [{ id: 'all', label: 'Tracts', color: null, tracts: this.tractOrder.slice().sort() }];
-      }
-      const groups = this.clusters.map(c => ({ id: c.id, label: `Cluster ${c.id}`, color: c.color, tracts: c.tracts.slice().sort() }));
-      const rest = this.tractOrder.filter(t => !this.clusterAssignments[t]).sort();
-      if (rest.length) groups.push({ id: 'none', label: 'Not clustered', color: '#555', tracts: rest });
-      return groups;
     },
 
     // Guided tour. Each step names a [data-tour] anchor and may prepare the
@@ -1479,7 +1444,6 @@ ${SURF_PANEL_TEMPLATE}
       this.selectedCluster = id;
       this.tab = 'cluster';
       this.selectedTopic = null;
-      this.$set(this.openClusters, id, true);
       this.sidebarOpen = false;
     },
 
@@ -1513,26 +1477,15 @@ ${SURF_PANEL_TEMPLATE}
       this.sidebarOpen = false;
     },
 
-    // Expand the sidebar group that holds this tract, and keep the cluster
-    // step in sync so the stepper reads "Cluster N › tract".
+    // Keep the cluster step in sync so the stepper reads "Cluster N › tract".
     revealTract(name) {
       const cid = this.clusterAssignments[name];
-      if (cid) { this.selectedCluster = cid; this.$set(this.openClusters, cid, true); }
-      else if (name) this.$set(this.openClusters, 'none', true);
+      if (cid) this.selectedCluster = cid;
     },
 
     jumpToCluster(id) {
       this.selectedCluster = id;
       this.tab = 'cluster';
-      this.$set(this.openClusters, id, true);
-    },
-
-    // Sidebar tree helpers
-    isOpen(id) { return !!this.openClusters[id]; },
-    toggleOpen(id) { this.$set(this.openClusters, id, !this.openClusters[id]); },
-    onClusterRowClick(id) {
-      if (id === 'none') { this.toggleOpen(id); return; }
-      this.selectCluster(id);
     },
     scrollToTopic() {
       if (this.tab === 'matrix') this.tab = this.selectedTract ? 'tract' : 'cluster';
@@ -1575,7 +1528,6 @@ ${SURF_PANEL_TEMPLATE}
     openFirstMatch() {
       if (this.filteredTracts.length) { this.selectTractAndSwitch(this.filteredTracts[0]); this.tractSearch = ''; }
     },
-    dismissGuide() { this.guideDismissed = true; writePref('wmc.guideDismissed', '1'); },
 
     // ── Guided tour ──────────────────────────────────────────
     startTour() {
@@ -1832,21 +1784,6 @@ ${SURF_PANEL_TEMPLATE}
         ? Math.max(...this.clusterTopTopics.map(x => Math.abs(x.value)))
         : 1;
       return maxAbs > 0 ? (Math.abs(v) / maxAbs) * 96 : 0;
-    },
-
-    clusterCellColor(clusterId, topic) {
-      const v = this.clusterMatrix[clusterId]?.[topic] ?? null;
-      return scoreToColor(v, this.vmin, this.vmax);
-    },
-
-    showClusterTip(event, clusterId, topic) {
-      const v = this.clusterMatrix[clusterId]?.[topic] ?? null;
-      this.tooltip = {
-        visible: true,
-        x: event.clientX + 14,
-        y: event.clientY - 10,
-        tract: `Cluster ${clusterId}`, topic, value: v
-      };
     },
 
     // ── Brain workspace (one SurfaceScene on the shared canvas) ──────
