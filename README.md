@@ -46,7 +46,7 @@ On pushes to `main`, GitHub Actions runs the tests and deploys `static/` plus `d
 | [`data/`](data/README.md) | configuration, lookup tables and published data, shared by the website and the API |
 | [`server/`](server/README.md) | read-only JSON API |
 | `scripts/` | offline scripts that build `data/` from the analysis outputs |
-| `tests/` | Python (`tests/server`) and JavaScript (`tests/js`) tests |
+| `tests/` | tests for `server/` (`tests/server`) and `static/` (`tests/static`) |
 
 ## Credits
 
