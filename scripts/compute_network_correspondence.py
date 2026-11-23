@@ -63,12 +63,9 @@ ATLASES = ["EG17", "TY7", "AS200Y17", "MG360J12", "XS268_8", "EG286_12"]
 FSAVERAGE6_N = 40962  # vertices per hemisphere
 NCT_THRESHOLD = 0.0001
 
-# Thresholds come from data/config.json, shared with the website: `cut` decides
-# cluster membership (and therefore cluster count), and `func` names the
-# threshold whose endpoint maps another reuses (thr-15_5clusters reuses thr-15's).
 with open(os.path.join(REPO_ROOT, "data", "config.json")) as f:
     THRESHOLDS = {
-        folder: {"cut": t.get("cut", 1.0), "func_dir": t.get("func", folder)}
+        folder: {"cut": t.get("cut", 1.0), "func_folder": t.get("func", folder)}
         for folder, t in json.load(f)["thresholds"].items()
     }
 
@@ -315,7 +312,7 @@ def main():
         if args.threshold and folder != args.threshold:
             continue
         thr_dir = os.path.join(THRESHOLDS_DIR, folder)
-        func_dir = os.path.join(THRESHOLDS_DIR, cfg["func_dir"], "func")
+        func_dir = os.path.join(THRESHOLDS_DIR, cfg["func_folder"], "func")
         matrix_csv = os.path.join(thr_dir, "matrix.csv")
         if not os.path.isdir(func_dir) or not os.path.isfile(matrix_csv):
             print(f"[{folder}] skip — missing func/ or matrix.csv")

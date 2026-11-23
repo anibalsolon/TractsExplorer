@@ -18,9 +18,9 @@
   <div v-if="error" class="error-msg">{{ error }}</div>
   <div v-else-if="skaiOn" class="te-layout">
     <skai-panel :config="config"></skai-panel>
-    <wmc-viewer :config="config"></wmc-viewer>
+    <wmc-viewer :config="config" :tract-names="tractNames"></wmc-viewer>
   </div>
-  <wmc-viewer v-else :config="config"></wmc-viewer>
+  <wmc-viewer v-else :config="config" :tract-names="tractNames"></wmc-viewer>
 </div>
 
 <script src="surf3d.js"></script>   <!-- GIFTI parsing + 3D cortical endpoint maps -->
@@ -31,7 +31,6 @@
 <script src="skai-client.js"></script>  <!-- SKAI (brainlife.io assistant) client -->
 <script src="skai-panel.js"></script>   <!-- SKAI side panel (only when config.skai.url is set) -->
 <script>
-  // Settings and lookup tables live in data/ (shared with the Python API).
   function getJson(url) {
     return fetch(url).then(function (r) {
       if (!r.ok) throw new Error(url + ': HTTP ' + r.status);
@@ -42,10 +41,9 @@
     .then(function (res) {
       var config = res[0], lookups = res[1];
       TEView.init(lookups.view);
-      TRACT_WORDS = lookups.tractNames;   // declared in viewer.js
       new Vue({
         el: '#app',
-        data: { error: null, config: config },
+        data: { error: null, config: config, tractNames: lookups.tractNames },
         computed: { skaiOn: function () { return !!(this.config.skai && this.config.skai.url); } }
       });
     })

@@ -112,7 +112,6 @@ function loadHemiMesh(meshBase, hemi) {
 // viewer only requests hemi/orientation combinations that actually exist
 // instead of blindly probing all four and eating 404s for the ones that
 // don't — most tracts are unilateral and/or only have one orientation.
-// Missing manifest → the caller probes all four combinations.
 
 const _manifestCache = {};
 

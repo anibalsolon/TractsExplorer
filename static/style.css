@@ -368,7 +368,6 @@ body.explorer { height: 100vh; overflow: hidden; }
 .dendro-svg .dendro-axis text { fill: var(--soft); font-size: 9px; font-family: var(--font-mono); }
 .dendro-note { font-size: .76rem; color: var(--soft); margin: 8px 6px 0; line-height: 1.45; }
 
-/* Sidebar tract list */
 .tree { padding: 0 8px 16px; }
 .tree-tracts { padding: 2px 0 6px 20px; display: flex; flex-direction: column; gap: 1px; }
 .tract-btn {

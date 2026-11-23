@@ -1,4 +1,3 @@
-"""Read-only data layer over published decoding results in data/ (config.json + thresholds/)."""
 import difflib
 import json
 import math
@@ -13,7 +12,6 @@ class NotFound(Exception):
         self.hint = hint
 
 
-# Same rule as viewer.js tractLabel; names come from data/lookups.json ("tractNames").
 def tract_label(raw, names):
     m = re.match(r"^(left|right)(.+)$", raw, re.I)
     side = m.group(1).lower() if m else None
@@ -52,27 +50,27 @@ class Repository:
         self.cfg = json.loads((self.root / "config.json").read_text())
         self.lookups = json.loads((self.root / "lookups.json").read_text())
         self.base = self.root / "thresholds"
-        self._entries = self.cfg["thresholds"]          # folder -> {label, value, ...}
-        self._default = self.cfg["defaultThreshold"]    # a folder
+        self._thresholds = self.cfg["thresholds"]
+        self._default_folder = self.cfg["defaultThreshold"]
         self._cache = {}
         self._topic_terms = None
 
     # ---- thresholds -------------------------------------------------
     def _ids(self):
-        return list(self._entries)
+        return list(self._thresholds)
 
     def resolve_threshold(self, x):
         valid = ", ".join(self._ids())
         if x is None or str(x).strip() in ("", "default"):
-            return self._default
+            return self._default_folder
         x = str(x).strip()
         if x in self._ids():
             return x
         if re.fullmatch(r"\d*\.?\d+", x):
             n = float(x)
-            if float(self._entries[self._default]["value"]) == n:
-                return self._default
-            for folder, e in self._entries.items():
+            if float(self._thresholds[self._default_folder]["value"]) == n:
+                return self._default_folder
+            for folder, e in self._thresholds.items():
                 if float(e["value"]) == n:
                     return folder
         raise NotFound(f"Unknown threshold '{x}'.",
@@ -80,10 +78,10 @@ class Repository:
 
     def thresholds(self):
         out = []
-        for folder, e in self._entries.items():
+        for folder, e in self._thresholds.items():
             f = self._frames(folder)
             out.append({"id": folder, "label": e["label"], "value": e["value"],
-                        "default": folder == self._default,
+                        "default": folder == self._default_folder,
                         "tracts": len(f["assign"]), "clusters": len(set(f["assign"].values()))})
         return out
 
@@ -194,7 +192,7 @@ class Repository:
         return self._topic_terms
 
     def _topic_columns(self):
-        return list(self._frames(self._default)["mats"]["joint"].columns)
+        return list(self._frames(self._default_folder)["mats"]["joint"].columns)
 
     def search_topics(self, q):
         q = q.strip().lower()

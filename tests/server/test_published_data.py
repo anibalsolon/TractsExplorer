@@ -1,4 +1,3 @@
-"""The files in data/ agree with each other (researchers use them directly, not only through the site)."""
 import json
 import pathlib
 
@@ -75,7 +74,6 @@ def test_network_correspondence(folder):
     assert set(n.group) <= atlases
     tracts = set(n[n.entity_type == "tract"].entity_id)
     assert tracts <= set(m.index)
-    # Only tracts with missing scores may lack network rows.
     assert set(m.index) - tracts <= set(m.index[m.isna().any(axis=1)])
     clusters = set(n[n.entity_type == "cluster"].entity_id)
     assert clusters == {str(c) for c in assignments(folder).cluster}

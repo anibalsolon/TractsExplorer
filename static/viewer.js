@@ -47,23 +47,19 @@ function topicLabel(raw) {
 // Human-readable tract names. The data uses internal identifiers such as
 // "leftArc" or "rightMDLFspl"; the raw id is always shown alongside (tooltip
 // or small print) so nothing is hidden, this just makes lists readable.
-// Set by explorer.html from data/lookups.json ("tractNames").
-let TRACT_WORDS = {};
-
-// Fixed layout of data/ (relative to explorer.html); see data/README.md.
-const DATA_THRESHOLDS = 'data/thresholds';   // <folder>/matrix.csv, ..., <folder>/func/*.func.gii
-const DATA_MESH = 'data/surf/mesh';          // fsaverage mesh the endpoint maps were made on
+const DATA_THRESHOLDS = 'data/thresholds';
+const DATA_MESH = 'data/surf/mesh';
 const DATA_TOPIC_TERMS = 'data/decoding/topic-terms.json';
-const DATA_ATLASES = 'data/atlases';         // <code>.json, from scripts/export_network_atlases.py
+const DATA_ATLASES = 'data/atlases';
 function tractParts(raw) {
   const m = /^(left|right)(.+)$/i.exec(raw);
   const side = m ? m[1].toLowerCase() : null;
   const rest = (m ? m[2] : raw).toLowerCase();
   return { side, rest };
 }
-function tractLabel(raw) {
+function tractLabel(raw, names) {
   const { side, rest } = tractParts(raw);
-  const base = TRACT_WORDS[rest] || raw.replace(/^(left|right)/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
+  const base = names[rest] || raw.replace(/^(left|right)/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
   return side ? `${side === 'left' ? 'L' : 'R'} ${base}` : base;
 }
 function tractSide(raw) {
@@ -81,9 +77,6 @@ const ATLAS_LABELS = {
 function readPref(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function writePref(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } }
 
-// Topic detail panel: full LDA term list for the topic clicked in
-// "Top Cognitive Topics" (data: data/decoding/topic-terms.json, made by
-// scripts/export_topic_terms.py). Shared by the Cluster and Tract views.
 const TOPIC_PANEL_TEMPLATE = `
               <aside class="panel-card topic-detail" v-if="selectedTopic" data-tour="topic-panel">
                 <div class="panel-card-title topic-detail-title">
@@ -288,7 +281,7 @@ const SUBTABS_TEMPLATE = `
 
 // ─── Main component ────────────────────────────────────────────────
 Vue.component('wmc-viewer', {
-  props: ['config'],
+  props: ['config', 'tractNames'],
 
   template: `
   <div class="wmc-root">
@@ -303,7 +296,7 @@ Vue.component('wmc-viewer', {
         <nav class="nav">
           <div class="control-group" data-tour="threshold" title="Endpoint-density threshold used to define tract endpoints (and the number of clusters it yields)">
             <label>Threshold</label>
-            <select class="select" v-model="selectedThreshold" @change="onThresholdChange">
+            <select class="select" v-model="thresholdFolder" @change="onThresholdChange">
               <option v-for="(t, folder) in config.thresholds" :key="folder" :value="folder">{{ t.label }}</option>
             </select>
           </div>
@@ -851,7 +844,7 @@ ${SURF_PANEL_TEMPLATE}
     return {
       tab: 'cluster',
       loading: true,
-      selectedThreshold: this.config.defaultThreshold || Object.keys(this.config.thresholds)[0],   // a threshold folder
+      thresholdFolder: this.config.defaultThreshold || Object.keys(this.config.thresholds)[0],
       selectedCluster: null,
       selectedTract: null,
       tractSearch: '',
@@ -876,7 +869,6 @@ ${SURF_PANEL_TEMPLATE}
       brain: { mode: 'both', hemi: 'both', view: 'dorsal', status: 'idle', max: 0, atlas: false, overlay: true, atlasOpacity: 0.8 },
       brainTints: [],            // [{ tract, color }] legend for "by tract" mode
       hoverTract: null,
-      // Network atlas painted on the cortex (data/atlases/<code>.json, from scripts/export_network_atlases.py)
       atlasInfo: null,           // { code, title, names, colors } of the atlas currently painted
       hoverNetwork: null,        // network name under the pointer (legend / Networks rows)
       focusNetwork: null,        // network isolated on the brain (click)
@@ -919,14 +911,12 @@ ${SURF_PANEL_TEMPLATE}
       return v;
     },
 
-    thresholdCfg()    { return this.config.thresholds[this.selectedThreshold]; },
-    thresholdFolder() { return this.selectedThreshold; },
+    thresholdCfg()    { return this.config.thresholds[this.thresholdFolder]; },
     baseUrl()         { return `${DATA_THRESHOLDS}/${this.thresholdFolder}`; },
     clusterColors()   { return CLUSTER_COLORS; },
     // Whether this threshold has cluster-level images / clustering data
     clustersEnabled() { return !this.thresholdCfg.noClusters; },
     // Per-tract func.gii endpoint map support (3D surface panel)
-    // <folder>/func, or another threshold's when func says they share endpoint maps
     surfBase()        { return `${DATA_THRESHOLDS}/${this.thresholdCfg.func || this.thresholdFolder}/func`; },
     surfMeshBase()    { return DATA_MESH; },
 
@@ -1035,7 +1025,7 @@ ${SURF_PANEL_TEMPLATE}
       // the side word ("left"), so "arcuate", "arc" and "left" all work.
       return this.tractOrder.filter(t => {
         const { side } = tractParts(t);
-        const hay = `${t} ${tractLabel(t)} ${side || ''}`.toLowerCase();
+        const hay = `${t} ${this.tractLabel(t)} ${side || ''}`.toLowerCase();
         return q.split(/\s+/).every(w => hay.includes(w));
       }).sort();
     },
@@ -1092,7 +1082,7 @@ ${SURF_PANEL_TEMPLATE}
     // Readable label for every tract (for the dendrogram leaves).
     tractLabels() {
       const out = {};
-      this.tractOrder.forEach(t => { out[t] = tractLabel(t); });
+      this.tractOrder.forEach(t => { out[t] = this.tractLabel(t); });
       return out;
     },
     matchCount() { return this.filteredTracts.length; },
@@ -1162,7 +1152,7 @@ ${SURF_PANEL_TEMPLATE}
     // landing page's #cluster|#tract|#matrix cards. Read the URL now, before
     // anything rewrites it; the threshold is set up front so it loads once.
     const view = TEView.parse(location.search, location.hash, this.config);
-    if (view.thr) this.selectedThreshold = view.thr;
+    if (view.thr) this.thresholdFolder = view.thr;
     if (view.tab === 'tract') this.sideMode = 'tracts';
 
     if (!this.clustersEnabled) {
@@ -1231,7 +1221,7 @@ ${SURF_PANEL_TEMPLATE}
         await this._whenLoaded();
         if (!live()) return;
         if (p.thr && p.thr in this.config.thresholds && p.thr !== this.thresholdFolder) {
-          this.selectedThreshold = p.thr;
+          this.thresholdFolder = p.thr;
           this.onThresholdChange();
           await this._whenLoaded();
           if (!live()) return;
@@ -1334,7 +1324,7 @@ ${SURF_PANEL_TEMPLATE}
             // already selected, just refresh the live 3D panel for the new
             // threshold's own data; otherwise leave its normal "select a
             // tract" empty state showing instead of jumping to Cluster View.
-            if (this.selectedTract) { this.revealTract(this.selectedTract); this.queueSurfRefresh(); }
+            if (this.selectedTract) { this.syncClusterToTract(this.selectedTract); this.queueSurfRefresh(); }
             else this.showTractView();
           } else if (this.tab === 'matrix') {
             // Stay on Full Matrix too — it re-renders from the new matrix.csv
@@ -1396,10 +1386,6 @@ ${SURF_PANEL_TEMPLATE}
       this.buildClusters();
     },
 
-    // Clusters are computed live from matrix.csv (see cluster.js) with the
-    // notebook's method: complete linkage on 1 − Pearson r, cut at
-    // thresholdCfg.cut (default 1.0). Numbering matches scipy's fcluster,
-    // i.e. the cluster ids used in cluster-matrix.csv and the images/N_surf.png figures.
     buildClusters() {
       const cut = this.thresholdCfg.cut ?? 1.0;
       const res = computeClustering(this.matrix, this.tractOrder, this.topics, cut);
@@ -1459,7 +1445,7 @@ ${SURF_PANEL_TEMPLATE}
         if (first) this.selectedTract = first;
       }
       this.tab = 'tract';
-      this.revealTract(this.selectedTract);
+      this.syncClusterToTract(this.selectedTract);
     },
 
     showClusterView() {
@@ -1471,12 +1457,11 @@ ${SURF_PANEL_TEMPLATE}
       this.selectedTract = name;
       this.selectedTopic = null;
       this.tab = 'tract';
-      this.revealTract(name);
+      this.syncClusterToTract(name);
       this.sidebarOpen = false;
     },
 
-    // Keep the cluster step in sync so the stepper reads "Cluster N › tract".
-    revealTract(name) {
+    syncClusterToTract(name) {
       const cid = this.clusterAssignments[name];
       if (cid) this.selectedCluster = cid;
     },
@@ -1589,7 +1574,7 @@ ${SURF_PANEL_TEMPLATE}
       this.tour.place = place;
       this.tour.cardStyle = { left: left + 'px', top: top + 'px', width: CW + 'px' };
     },
-    tractLabel(raw) { return tractLabel(raw); },
+    tractLabel(raw) { return tractLabel(raw, this.tractNames); },
     tractSide(raw) { return tractSide(raw); },
     atlasLabel(code) { return ATLAS_LABELS[code] || code; },
 
@@ -1831,7 +1816,6 @@ ${SURF_PANEL_TEMPLATE}
       const i = this.atlasInfo.names.indexOf(name);
       return i >= 0 ? this.atlasInfo.colors[i] : null;
     },
-    // data/atlases/<code>.json, decoded once per atlas and kept.
     loadAtlas(code) {
       this._atlasCache = this._atlasCache || new Map();
       if (!this._atlasCache.has(code)) {

@@ -48,7 +48,7 @@ def create_app(root: Path, public_url: str, root_path: str = "") -> FastAPI:
     root = Path(root).resolve()
     public_url = public_url.rstrip("/")
     repo = Repository(root)
-    view_keys, enums = repo.lookups["view"]["keys"], repo.lookups["view"]["enums"]  # data/lookups.json
+    view_keys, enums = repo.lookups["view"]["keys"], repo.lookups["view"]["enums"]
     app = FastAPI(title="TractsExplorer API", docs_url=None, redoc_url=None, openapi_url=None)
     app.root_path = root_path  # set directly: the constructor argument is deprecated
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])

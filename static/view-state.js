@@ -1,6 +1,5 @@
 // View links: parse/build explorer URLs. Plain browser JS; also CommonJS.
 (function (root) {
-  // Keys (in query-string order) and enum values come from data/lookups.json ("view"), via init().
   var KEYS = [], ENUMS = {};
   function init(view) { KEYS = view.keys; ENUMS = view.enums; }
   var ID_RE = /^[A-Za-z0-9_]+$/;

@@ -48,7 +48,7 @@ jobs:
         run: |
           cp -R static _site
           cp -R data _site/data
-          rm -rf _site/data/thresholds/*/images   # kept in the repo for researchers; the site draws its figures live
+          rm -rf _site/data/thresholds/*/images
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
