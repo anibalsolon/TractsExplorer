@@ -3,7 +3,7 @@
 
 Reads the gradec / NeuroQuery LDA files that decode-tracts.ipynb fetches with
 _fetch_features / _fetch_frequencies / _fetch_classification, and writes
-assets/decoding/topic-terms.json:
+data/decoding/topic-terms.json:
 
   {"source": ..., "topics": {"<id>": {"class": <topic class>,
                                       "terms": [[term, weight, class], ...]}}}
@@ -22,7 +22,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     HERE, '..', '..', 'Kims-Revisions', 'data', 'decoding')
-OUT = os.path.join(HERE, '..', 'assets', 'decoding', 'topic-terms.json')
+OUT = os.path.join(HERE, '..', 'data', 'decoding', 'topic-terms.json')
 PREFIX = 'source-neuroquery_desc-lda_'
 
 

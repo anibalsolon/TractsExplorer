@@ -1,0 +1,6 @@
+# Offline build scripts (scripts/*.py). Python 3.11; see the README for the cbig_nc environment.
+cbig_network_correspondence
+nibabel
+numpy
+pandas
+scipy

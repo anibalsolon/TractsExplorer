@@ -4,8 +4,9 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
-const TEView = require('../../view-state.js');
-const config = JSON.parse(readFileSync(new URL('../../config.json', import.meta.url), 'utf8'));
+const TEView = require('../../static/view-state.js');
+TEView.init(JSON.parse(readFileSync(new URL('../../data/lookups.json', import.meta.url), 'utf8')).view);
+const config = JSON.parse(readFileSync(new URL('../../data/config.json', import.meta.url), 'utf8'));
 const cfg = { thresholds: config.thresholds, defaultThreshold: config.defaultThreshold };
 
 test('parse basic with value-normalised threshold', () => {

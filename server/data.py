@@ -1,4 +1,4 @@
-"""Read-only data layer over the published decoding results (config.json + testdata/)."""
+"""Read-only data layer over published decoding results in data/ (config.json + thresholds/)."""
 import difflib
 import json
 import math
@@ -13,33 +13,12 @@ class NotFound(Exception):
         self.hint = hint
 
 
-# Port of viewer.js TRACT_WORDS / tractParts / tractLabel.
-TRACT_WORDS = {
-    "arc": "Arcuate", "parc": "Posterior arcuate", "slf1and2": "SLF I & II", "slf3": "SLF III",
-    "ifof": "IFOF", "ilf": "ILF", "vof": "VOF", "uncinate": "Uncinate", "cingulum": "Cingulum",
-    "cst": "Corticospinal", "aslant": "Frontal aslant", "tpc": "Temporo-parietal connection",
-    "mdlfang": "MdLF (angular)", "mdlfspl": "MdLF (SPL)",
-    "inferioropticradiation": "Inferior optic radiation",
-    "superioropticradiation": "Superior optic radiation",
-    "forcepsmajor": "Forceps major", "forcepsminor": "Forceps minor",
-    "anteriofrontalcc": "Anterior frontal CC", "middlefrontalcc": "Middle frontal CC",
-    "parietalcc": "Parietal CC",
-    "frontothalamic": "Fronto-thalamic", "parietothalamic": "Parieto-thalamic",
-    "temporothalamic": "Temporo-thalamic", "motorthalamic": "Motor-thalamic",
-    "spinothalamic": "Spino-thalamic",
-    "anteriofrontocerebellar": "Anterior fronto-cerebellar",
-    "contraanteriofrontocerebellar": "Contralateral anterior fronto-cerebellar",
-    "motorcerebellar": "Motor-cerebellar", "contramotorcerebellar": "Contralateral motor-cerebellar",
-    "parietocerebellar": "Parieto-cerebellar", "occipitocerebellar": "Occipito-cerebellar",
-    "thalamicocerebellar": "Thalamo-cerebellar",
-}
-
-
-def tract_label(raw):
+# Same rule as viewer.js tractLabel; names come from data/lookups.json ("tractNames").
+def tract_label(raw, names):
     m = re.match(r"^(left|right)(.+)$", raw, re.I)
     side = m.group(1).lower() if m else None
     rest = (m.group(2) if m else raw).lower()
-    base = TRACT_WORDS.get(rest)
+    base = names.get(rest)
     if base is None:
         base = re.sub(r"^(left|right)", "", raw)
         base = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", base)
@@ -71,39 +50,40 @@ class Repository:
         self._pd = pd
         self.root = Path(root)
         self.cfg = json.loads((self.root / "config.json").read_text())
-        self.base = self.root / self.cfg["dataBase"]
-        self._entries = list(self.cfg["thresholds"].items())
-        self._default = self.cfg["thresholds"][self.cfg["defaultThreshold"]]
+        self.lookups = json.loads((self.root / "lookups.json").read_text())
+        self.base = self.root / "thresholds"
+        self._entries = self.cfg["thresholds"]          # folder -> {label, value, ...}
+        self._default = self.cfg["defaultThreshold"]    # a folder
         self._cache = {}
         self._topic_terms = None
 
     # ---- thresholds -------------------------------------------------
     def _ids(self):
-        return [e["folder"] for _, e in self._entries]
+        return list(self._entries)
 
     def resolve_threshold(self, x):
         valid = ", ".join(self._ids())
         if x is None or str(x).strip() in ("", "default"):
-            return self._default["folder"]
+            return self._default
         x = str(x).strip()
         if x in self._ids():
             return x
         if re.fullmatch(r"\d*\.?\d+", x):
             n = float(x)
-            if float(self._default["value"]) == n:
-                return self._default["folder"]
-            for _, e in self._entries:
+            if float(self._entries[self._default]["value"]) == n:
+                return self._default
+            for folder, e in self._entries.items():
                 if float(e["value"]) == n:
-                    return e["folder"]
+                    return folder
         raise NotFound(f"Unknown threshold '{x}'.",
                        f"Valid thresholds: {valid}, or a numeric value, or 'default'.")
 
     def thresholds(self):
         out = []
-        for label, e in self._entries:
-            f = self._frames(e["folder"])
-            out.append({"id": e["folder"], "label": label, "value": e["value"],
-                        "default": e["folder"] == self._default["folder"],
+        for folder, e in self._entries.items():
+            f = self._frames(folder)
+            out.append({"id": folder, "label": e["label"], "value": e["value"],
+                        "default": folder == self._default,
                         "tracts": len(f["assign"]), "clusters": len(set(f["assign"].values()))})
         return out
 
@@ -126,6 +106,9 @@ class Repository:
         return f
 
     # ---- helpers ----------------------------------------------------
+    def _label(self, name):
+        return tract_label(name, self.lookups["tractNames"])
+
     @staticmethod
     def _top(row, n):
         """Top n topics ranked by |r| descending (as the explorer does); r keeps its sign."""
@@ -145,7 +128,7 @@ class Repository:
         low = {n.lower(): n for n in names}
         if name.lower() in low:
             return low[name.lower()]
-        labels = {tract_label(n): n for n in names}
+        labels = {self._label(n): n for n in names}
         hits = []
         for c in difflib.get_close_matches(name, names, n=3) + \
                 [labels[x] for x in difflib.get_close_matches(name, list(labels), n=3)]:
@@ -153,7 +136,7 @@ class Repository:
                 hits.append(c)
         q = name.lower()
         for n in names:
-            if n not in hits and (q in n.lower() or q in tract_label(n).lower()):
+            if n not in hits and (q in n.lower() or q in self._label(n).lower()):
                 hits.append(n)
         hint = ("Did you mean: " + ", ".join(hits) + "?") if hits else \
             "Use find_tracts to search for a tract name."
@@ -191,14 +174,14 @@ class Repository:
     def find_tracts(self, thr, q):
         f = self._frames(thr)
         q = q.strip().lower()
-        return [{"tract": n, "label": tract_label(n), "cluster": f["assign"].get(n)}
+        return [{"tract": n, "label": self._label(n), "cluster": f["assign"].get(n)}
                 for n in self._tract_names(thr)
-                if q in n.lower() or q in tract_label(n).lower()]
+                if q in n.lower() or q in self._label(n).lower()]
 
     def tract(self, thr, name, atlas=None, limit=10):
         f = self._frames(thr)
         name = self.resolve_tract(thr, name)
-        return {"tract": name, "label": tract_label(name), "cluster": f["assign"].get(name),
+        return {"tract": name, "label": self._label(name), "cluster": f["assign"].get(name),
                 "top_topics": {k: self._top(f["mats"][k].loc[name], limit) if name in f["mats"][k].index else []
                                for k in ("joint", "RAS", "LPI")},
                 "networks": self.networks(thr, "tract", name, atlas)[:limit]}
@@ -206,12 +189,12 @@ class Repository:
     # ---- topics -----------------------------------------------------
     def _terms(self):
         if self._topic_terms is None:
-            p = self.root / self.cfg["topicTermsUrl"]
+            p = self.root / "decoding" / "topic-terms.json"
             self._topic_terms = json.loads(p.read_text())["topics"]
         return self._topic_terms
 
     def _topic_columns(self):
-        return list(self._frames(self._default["folder"])["mats"]["joint"].columns)
+        return list(self._frames(self._default)["mats"]["joint"].columns)
 
     def search_topics(self, q):
         q = q.strip().lower()
